@@ -2,9 +2,9 @@ use super::error::{to_other, to_vulkan, Result};
 use super::util::copy_extent_2d;
 use std::{ffi::CString, mem::size_of};
 use vk_sys as vk;
-
 use inline_spirv::include_spirv;
 use vulkanic::DevicePointers;
+use super::vertex::Vertex;
 
 pub fn create_graphics_pipeline(
     dp: &DevicePointers,
@@ -47,14 +47,17 @@ pub fn create_graphics_pipeline(
 
     let shader_stages = [vertex_shader_info, fragment_shader_info];
 
+    let binding_description = Vertex::get_binding_description();
+    let attribute_descriptions = Vertex::get_attribute_descriptions();
+
     let vert_input_info = vk::PipelineVertexInputStateCreateInfo {
         sType: vk::STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         pNext: std::ptr::null(),
         flags: 0,
-        vertexBindingDescriptionCount: 0,
-        pVertexBindingDescriptions: std::ptr::null(),
-        vertexAttributeDescriptionCount: 0,
-        pVertexAttributeDescriptions: std::ptr::null(),
+        vertexBindingDescriptionCount: 1,
+        pVertexBindingDescriptions: &binding_description,
+        vertexAttributeDescriptionCount: attribute_descriptions.len() as u32,
+        pVertexAttributeDescriptions: attribute_descriptions.as_ptr(),
     };
 
     let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo {

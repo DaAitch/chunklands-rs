@@ -13,6 +13,8 @@ mod vk_render_pass;
 mod vk_surface;
 mod vk_swapchain;
 mod vk_sync_object;
+mod vertex;
+mod vk_vertex_buffer;
 
 use error::{to_other, Error, Result};
 use vk_command::{create_command_buffer, create_command_pool};
@@ -31,7 +33,7 @@ use vulkanic::{DevicePointers, EntryPoints, InstancePointers};
 
 use vk_sys as vk;
 
-use self::error::to_vulkan;
+use self::{error::to_vulkan, vk_vertex_buffer::create_vertex_buffer};
 
 pub struct VulkanInit<'a> {
     pub debug: bool,
@@ -337,6 +339,8 @@ struct Swapchain {
     render_pass: vk::RenderPass,
     vertex_shader_module: vk::ShaderModule,
     fragment_shader_module: vk::ShaderModule,
+    vertex_buffer: vk::Buffer,
+    vertex_buffer_memory: vk::DeviceMemory,
 }
 
 impl Swapchain {
@@ -356,6 +360,8 @@ impl Swapchain {
         let (vertex_shader_module, fragment_shader_module, pipeline_layout, pipeline) =
             create_graphics_pipeline(init.dp, init.device, &extent, render_pass)?;
 
+        let (vertex_buffer, vertex_buffer_memory) = create_vertex_buffer(init.ip, init.dp, init.physical_device, init.device)?;
+
         let images = init
             .dp
             .get_swapchain_images_khr(init.device, swapchain)
@@ -372,6 +378,7 @@ impl Swapchain {
                 pipeline,
                 render_pass,
                 surface_format: &format,
+                vertex_buffer
             })?;
 
             swapchain_images.push(swapchain_image);
@@ -385,6 +392,8 @@ impl Swapchain {
             swapchain,
             vertex_shader_module,
             fragment_shader_module,
+            vertex_buffer,
+            vertex_buffer_memory,
         })
     }
 
@@ -395,6 +404,9 @@ impl Swapchain {
         command_pool: vk::CommandPool,
     ) -> Result<()> {
         dp.device_wait_idle(device).map_err(to_vulkan)?;
+
+        dp.free_memory(device, self.vertex_buffer_memory);
+        dp.destroy_buffer(device, self.vertex_buffer);
 
         for image in &self.images {
             dp.destroy_framebuffer(device, image.framebuffer);
@@ -430,6 +442,7 @@ struct ScImageInit<'a> {
     command_pool: vk::CommandPool,
     pipeline: vk::Pipeline,
     surface_format: &'a vk::SurfaceFormatKHR,
+    vertex_buffer: vk::Buffer,
 }
 
 impl SwapchainImage {
@@ -451,6 +464,7 @@ impl SwapchainImage {
             init.command_pool,
             framebuffer,
             init.extent,
+            init.vertex_buffer,
         )?;
 
         Ok(Self {

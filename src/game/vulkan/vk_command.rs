@@ -30,6 +30,7 @@ pub fn create_command_buffer(
     command_pool: vk::CommandPool,
     framebuffer: vk::Framebuffer,
     extent: &vk::Extent2D,
+    vertex_buffer: vk::Buffer,
 ) -> Result<vk::CommandBuffer> {
     let command_buffer = {
         let info = vk::CommandBufferAllocateInfo {
@@ -79,6 +80,11 @@ pub fn create_command_buffer(
     }
 
     dp.cmd_bind_pipeline(command_buffer, vk::PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    let vertex_buffers = [vertex_buffer];
+    let offsets: [vk::DeviceSize; 1] = [0];
+    dp.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+
     dp.cmd_draw(command_buffer, 3, 1, 0, 0);
     dp.cmd_end_render_pass(command_buffer);
 

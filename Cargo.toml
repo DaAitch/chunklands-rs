@@ -13,3 +13,5 @@ log = "0.4"
 env_logger = "0.8"
 inline-spirv = "0.1"
 vulkanic = {path = "./vulkanic-rs"}
+glm = "0.2"
+memoffset = "0.6.3"
