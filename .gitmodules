@@ -1,0 +1,3 @@
+[submodule "vulkanic-rs"]
+	path = vulkanic-rs
+	url = https://github.com/DaAitch/vulkanic-rs
