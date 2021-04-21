@@ -1,9 +1,8 @@
+use super::util::copy_extent_2d;
 use super::{
     error::{to_vulkan, Result},
     vk_queue::QueueFamilyIndices,
 };
-
-use super::util::copy_extent_2d;
 use vk_sys as vk;
 use vulkanic::DevicePointers;
 

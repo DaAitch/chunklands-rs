@@ -1,7 +1,6 @@
-use std::mem::size_of;
-
-use vk_sys as vk;
 use memoffset::offset_of;
+use std::mem::size_of;
+use vk_sys as vk;
 
 #[repr(C)]
 pub struct Vertex {
@@ -31,7 +30,7 @@ impl Vertex {
                 binding: 0,
                 format: vk::FORMAT_R32G32B32_SFLOAT,
                 offset: offset_of!(Self, color) as u32,
-            }
+            },
         ]
     }
 }

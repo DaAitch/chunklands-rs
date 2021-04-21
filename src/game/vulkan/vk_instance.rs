@@ -1,15 +1,13 @@
 use super::error::{to_vulkan, Result};
 use super::util::CStrings;
+use super::{error::Error, util::cchar_to_string, version::VulkanVersion};
 use log::{error, info, log, Level};
-use vulkanic::{EntryPoints, InstancePointers};
-
 use std::{
     ffi::{c_void, CString},
     ptr,
 };
 use vk_sys as vk;
-
-use super::{error::Error, util::cchar_to_string, version::VulkanVersion};
+use vulkanic::{EntryPoints, InstancePointers};
 
 pub fn create_instance(
     ep: &EntryPoints,

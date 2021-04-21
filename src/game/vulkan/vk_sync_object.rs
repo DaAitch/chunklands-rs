@@ -1,5 +1,4 @@
 use super::error::{to_vulkan, Result};
-
 use vk_sys as vk;
 use vulkanic::DevicePointers;
 

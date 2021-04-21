@@ -1,6 +1,5 @@
 use super::error::{maybe_vulkan_error, Result};
 use std::mem;
-
 use vk_sys as vk;
 
 pub fn create_surface(window: &glfw::Window, instance: vk::Instance) -> Result<vk::SurfaceKHR> {

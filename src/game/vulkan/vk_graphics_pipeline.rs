@@ -1,10 +1,10 @@
 use super::error::{to_other, to_vulkan, Result};
 use super::util::copy_extent_2d;
+use super::vertex::Vertex;
+use inline_spirv::include_spirv;
 use std::{ffi::CString, mem::size_of};
 use vk_sys as vk;
-use inline_spirv::include_spirv;
 use vulkanic::DevicePointers;
-use super::vertex::Vertex;
 
 pub fn create_graphics_pipeline(
     dp: &DevicePointers,

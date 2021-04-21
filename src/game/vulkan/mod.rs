@@ -1,6 +1,7 @@
 mod error;
 mod util;
 mod version;
+mod vertex;
 mod vk_command;
 mod vk_device;
 mod vk_framebuffer;
@@ -13,7 +14,6 @@ mod vk_render_pass;
 mod vk_surface;
 mod vk_swapchain;
 mod vk_sync_object;
-mod vertex;
 mod vk_vertex_buffer;
 
 use error::{to_other, Error, Result};
@@ -360,7 +360,8 @@ impl Swapchain {
         let (vertex_shader_module, fragment_shader_module, pipeline_layout, pipeline) =
             create_graphics_pipeline(init.dp, init.device, &extent, render_pass)?;
 
-        let (vertex_buffer, vertex_buffer_memory) = create_vertex_buffer(init.ip, init.dp, init.physical_device, init.device)?;
+        let (vertex_buffer, vertex_buffer_memory) =
+            create_vertex_buffer(init.ip, init.dp, init.physical_device, init.device)?;
 
         let images = init
             .dp
@@ -378,7 +379,7 @@ impl Swapchain {
                 pipeline,
                 render_pass,
                 surface_format: &format,
-                vertex_buffer
+                vertex_buffer,
             })?;
 
             swapchain_images.push(swapchain_image);

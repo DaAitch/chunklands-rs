@@ -1,11 +1,18 @@
+use super::{
+    error::{to_other, to_vulkan, Result},
+    vertex::Vertex,
+};
 use glm::{Vec2, Vec3};
+use std::{mem::size_of, ptr};
 use vk_sys as vk;
 use vulkanic::{DevicePointers, InstancePointers};
-use std::{mem::size_of, ptr};
-use super::{error::{Result, to_other, to_vulkan}, vertex::Vertex};
 
-
-pub fn create_vertex_buffer(ip: &InstancePointers, dp: &DevicePointers, physical_device: vk::PhysicalDevice, device: vk::Device) -> Result<(vk::Buffer, vk::DeviceMemory)> {
+pub fn create_vertex_buffer(
+    ip: &InstancePointers,
+    dp: &DevicePointers,
+    physical_device: vk::PhysicalDevice,
+    device: vk::Device,
+) -> Result<(vk::Buffer, vk::DeviceMemory)> {
     let vertices = [
         Vertex {
             pos: Vec2::new(0.0, -0.5),
@@ -40,24 +47,45 @@ pub fn create_vertex_buffer(ip: &InstancePointers, dp: &DevicePointers, physical
         sType: vk::STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         pNext: ptr::null(),
         allocationSize: memory_requirements.size,
-        memoryTypeIndex: find_memory_type(ip, physical_device, memory_requirements.memoryTypeBits, vk::MEMORY_PROPERTY_HOST_VISIBLE_BIT | vk::MEMORY_PROPERTY_HOST_COHERENT_BIT)?,
+        memoryTypeIndex: find_memory_type(
+            ip,
+            physical_device,
+            memory_requirements.memoryTypeBits,
+            vk::MEMORY_PROPERTY_HOST_VISIBLE_BIT | vk::MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        )?,
     };
 
     let device_memory = unsafe { dp.allocate_memory(device, &allocate_info) }.map_err(to_vulkan)?;
 
-    dp.bind_buffer_memory(device, buffer, device_memory, 0).map_err(to_vulkan)?;
+    dp.bind_buffer_memory(device, buffer, device_memory, 0)
+        .map_err(to_vulkan)?;
 
-    let data = dp.map_memory(device, device_memory, 0, buffer_info.size, 0).map_err(to_vulkan)?;
-    unsafe { std::ptr::copy_nonoverlapping(vertices.as_ptr(), data as *mut Vertex, buffer_info.size as usize) };
+    let data = dp
+        .map_memory(device, device_memory, 0, buffer_info.size, 0)
+        .map_err(to_vulkan)?;
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            vertices.as_ptr(),
+            data as *mut Vertex,
+            buffer_info.size as usize,
+        )
+    };
     dp.unmap_memory(device, device_memory);
 
     Ok((buffer, device_memory))
 }
 
-fn find_memory_type(ip: &InstancePointers, physical_device: vk::PhysicalDevice, type_filter: u32, flags: vk::MemoryPropertyFlags) -> Result<u32> {
+fn find_memory_type(
+    ip: &InstancePointers,
+    physical_device: vk::PhysicalDevice,
+    type_filter: u32,
+    flags: vk::MemoryPropertyFlags,
+) -> Result<u32> {
     let properties = ip.get_physical_device_memory_properties(physical_device);
     for i in 0..properties.memoryTypeCount {
-        if (type_filter & (1 << i)) != 0 && (properties.memoryTypes[i as usize].propertyFlags & flags) != 0 {
+        if (type_filter & (1 << i)) != 0
+            && (properties.memoryTypes[i as usize].propertyFlags & flags) != 0
+        {
             return Ok(i);
         }
     }
