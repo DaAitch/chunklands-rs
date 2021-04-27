@@ -13,7 +13,6 @@ mod vk_queue;
 mod vk_render_pass;
 mod vk_surface;
 mod vk_swapchain;
-mod vk_sync_object;
 mod vk_vertex_buffer;
 
 use error::{to_other, Error, Result};
@@ -28,12 +27,13 @@ use vk_queue::{find_queue_families, get_device_queue_families, QueueFamilies, Qu
 use vk_render_pass::create_render_pass;
 use vk_surface::create_surface;
 use vk_swapchain::create_swapchain;
-use vk_sync_object::{create_sync_objects, MAX_FRAMES_IN_FLIGHT};
 use vulkanic::{DevicePointers, EntryPoints, InstancePointers};
 
 use vk_sys as vk;
 
 use self::{error::to_vulkan, vk_vertex_buffer::create_vertex_buffer};
+
+pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 pub struct VulkanInit<'a> {
     pub debug: bool,
@@ -55,7 +55,7 @@ pub struct Vulkan {
     surface: vk::SurfaceKHR,
     swapchain: Option<Swapchain>,
     command_pool: vk::CommandPool,
-    sync_objects: Vec<(vk::Semaphore, vk::Semaphore, vk::Fence)>,
+    inflight_frames: Vec<InFlightFrame>,
     current_frame: usize,
 }
 
@@ -97,7 +97,11 @@ impl Vulkan {
 
         let command_pool = create_command_pool(&dp, device, &queue_family_indices)?;
 
-        let sync_objects = create_sync_objects(&dp, device)?;
+        let mut inflight_frames = Vec::<InFlightFrame>::new();
+        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+            let frame = InFlightFrame::new(&dp, device)?;
+            inflight_frames.push(frame);
+        }
 
         Ok(Vulkan {
             ep,
@@ -111,7 +115,7 @@ impl Vulkan {
             queue_families: queues,
             surface,
             command_pool,
-            sync_objects,
+            inflight_frames,
             current_frame: 0,
             swapchain: None,
         })
@@ -155,24 +159,29 @@ impl Vulkan {
         let acquire_result = {
             let swapchain = self.swapchain.as_mut().unwrap();
 
-            let current_frame_sync_objects = *self
-                .sync_objects
+            let current_inflight_frame = self
+                .inflight_frames
                 .get(self.current_frame)
                 .ok_or_else(|| to_other("invalid current frame"))?;
 
             self.dp
-                .wait_for_fences(self.device, &[current_frame_sync_objects.2], true, u64::MAX)
+                .wait_for_fences(
+                    self.device,
+                    &[current_inflight_frame.in_flight_fence],
+                    true,
+                    u64::MAX,
+                )
                 .map_err(to_vulkan)?;
             self.dp
                 .acquire_next_image_khr(
                     self.device,
                     swapchain.swapchain,
                     u64::MAX,
-                    current_frame_sync_objects.0,
+                    current_inflight_frame.available_semaphore,
                     vk::NULL_HANDLE,
                 )
                 .map_err(to_vulkan)
-                .map(|next_image| (next_image, current_frame_sync_objects))
+                .map(|next_image| (next_image, current_inflight_frame))
         };
 
         if let Err(Error::VulkanError(vk::ERROR_OUT_OF_DATE_KHR)) = acquire_result {
@@ -180,18 +189,18 @@ impl Vulkan {
             return Ok(());
         }
 
-        let (image_index, current_frame_sync_objects) = acquire_result?;
+        let (image_index_index, current_inflight_frame) = acquire_result?;
 
         let swapchain = self.swapchain.as_mut().unwrap();
 
         let swapchain_images_len = swapchain.images.len();
         let swapchain_image = swapchain
             .images
-            .get_mut(image_index as usize)
+            .get_mut(image_index_index as usize)
             .ok_or_else(|| {
                 to_other(format!(
                     "invalid current image index {} of len {} sync objects",
-                    image_index, swapchain_images_len
+                    image_index_index, swapchain_images_len
                 ))
             })?;
 
@@ -206,14 +215,14 @@ impl Vulkan {
                 .map_err(to_vulkan)?;
         }
 
-        swapchain_image.in_flight_fence = current_frame_sync_objects.2;
+        swapchain_image.in_flight_fence = current_inflight_frame.in_flight_fence;
 
         let command_buffers = [swapchain_image.command_buffer];
 
         let wait_dst_stage_mask = [vk::PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT];
 
-        let wait_semaphores = [current_frame_sync_objects.0];
-        let signal_semaphores = [current_frame_sync_objects.1];
+        let wait_semaphores = [current_inflight_frame.available_semaphore];
+        let signal_semaphores = [current_inflight_frame.rendered_semaphore];
 
         let submit_info = vk::SubmitInfo {
             sType: vk::STRUCTURE_TYPE_SUBMIT_INFO,
@@ -228,14 +237,14 @@ impl Vulkan {
         };
 
         self.dp
-            .reset_fences(self.device, &[current_frame_sync_objects.2])
+            .reset_fences(self.device, &[current_inflight_frame.in_flight_fence])
             .map_err(to_vulkan)?;
 
         unsafe {
             self.dp.queue_submit(
                 self.queue_families.graphics_queue,
                 &[submit_info],
-                current_frame_sync_objects.2,
+                current_inflight_frame.in_flight_fence,
             )
         }
         .map_err(to_vulkan)?;
@@ -249,7 +258,7 @@ impl Vulkan {
             pWaitSemaphores: signal_semaphores.as_ptr(),
             swapchainCount: swapchains.len() as u32,
             pSwapchains: swapchains.as_ptr(),
-            pImageIndices: &image_index,
+            pImageIndices: &image_index_index,
             pResults: std::ptr::null_mut(),
         };
 
@@ -283,12 +292,8 @@ impl Vulkan {
     }
 
     pub fn destroy(mut self) -> Result<()> {
-        for (image_available_sem, render_finished_sem, in_flight_fence) in
-            self.sync_objects.drain(..)
-        {
-            self.dp.destroy_semaphore(self.device, image_available_sem);
-            self.dp.destroy_semaphore(self.device, render_finished_sem);
-            self.dp.destroy_fence(self.device, in_flight_fence);
+        for inflight_frame in self.inflight_frames.drain(..) {
+            inflight_frame.destroy(&self.dp, self.device);
         }
 
         self.swapchain
@@ -476,4 +481,76 @@ impl SwapchainImage {
             in_flight_fence: vk::NULL_HANDLE,
         })
     }
+}
+
+struct InFlightFrame {
+    available_semaphore: vk::Semaphore,
+    rendered_semaphore: vk::Semaphore,
+    in_flight_fence: vk::Fence,
+}
+
+impl InFlightFrame {
+    fn new(dp: &DevicePointers, device: vk::Device) -> Result<Self> {
+        Ok(Self {
+            available_semaphore: create_semaphore(dp, device)?,
+            rendered_semaphore: create_semaphore(dp, device)?,
+            in_flight_fence: create_signaled_fence(dp, device)?,
+        })
+    }
+
+    fn destroy(self, dp: &DevicePointers, device: vk::Device) {
+        dp.destroy_semaphore(device, self.available_semaphore);
+        dp.destroy_semaphore(device, self.rendered_semaphore);
+        dp.destroy_fence(device, self.in_flight_fence);
+    }
+}
+
+fn create_primary_command_buffer(
+    dp: &DevicePointers,
+    device: vk::Device,
+    command_pool: vk::CommandPool,
+) -> Result<vk::CommandBuffer> {
+    let command_buffers = unsafe {
+        dp.allocate_command_buffers(
+            device,
+            &vk::CommandBufferAllocateInfo {
+                sType: vk::STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                pNext: std::ptr::null(),
+                commandPool: command_pool,
+                level: vk::COMMAND_BUFFER_LEVEL_PRIMARY,
+                commandBufferCount: 1,
+            },
+        )
+        .map_err(to_vulkan)
+    }?;
+
+    Ok(command_buffers.iter().cloned().next().unwrap())
+}
+
+fn create_semaphore(dp: &DevicePointers, device: vk::Device) -> Result<vk::Semaphore> {
+    unsafe {
+        dp.create_semaphore(
+            device,
+            &vk::SemaphoreCreateInfo {
+                sType: vk::STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                pNext: std::ptr::null(),
+                flags: 0,
+            },
+        )
+    }
+    .map_err(to_vulkan)
+}
+
+fn create_signaled_fence(dp: &DevicePointers, device: vk::Device) -> Result<vk::Fence> {
+    unsafe {
+        dp.create_fence(
+            device,
+            &vk::FenceCreateInfo {
+                sType: vk::STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                pNext: std::ptr::null(),
+                flags: vk::FENCE_CREATE_SIGNALED_BIT,
+            },
+        )
+    }
+    .map_err(to_vulkan)
 }
