@@ -1,31 +1,24 @@
-use super::util::{copy_extent_2d, copy_surface_format_khr};
+use super::{Context, util::{copy_extent_2d, copy_surface_format_khr}};
 use super::{
-    error::{to_other, to_vulkan, Error, Result},
-    vk_queue::QueueFamilyIndices,
+    error::{to_other, to_vulkan, Error, Result}
 };
 use glfw::Window;
 use vk_sys as vk;
-use vulkanic::{DevicePointers, InstancePointers};
 
-pub fn create_swapchain(
-    ip: &InstancePointers,
-    dp: &DevicePointers,
-    physical_device: vk::PhysicalDevice,
-    device: vk::Device,
-    surface: vk::SurfaceKHR,
+pub(super) fn create_swapchain(
+    ctx: &Context,
     window: &Window,
-    queue_family_indices: &QueueFamilyIndices,
 ) -> Result<(
     vk::SwapchainKHR,
     vk::SurfaceFormatKHR,
     vk::PresentModeKHR,
     vk::Extent2D,
 )> {
-    let formats = ip
-        .get_physical_device_surface_formats_khr(physical_device, surface)
+    let formats = ctx.ip
+        .get_physical_device_surface_formats_khr(ctx.physical_device, ctx.surface)
         .map_err(to_vulkan)?;
-    let modes = ip
-        .get_physical_device_surface_present_modes_khr(physical_device, surface)
+    let modes = ctx.ip
+        .get_physical_device_surface_present_modes_khr(ctx.physical_device, ctx.surface)
         .map_err(to_vulkan)?;
 
     let good_format = formats
@@ -41,17 +34,17 @@ pub fn create_swapchain(
         .find(|mode| **mode == vk::PRESENT_MODE_MAILBOX_KHR)
         .unwrap_or(&vk::PRESENT_MODE_FIFO_KHR);
 
-    let capabilities = ip
-        .get_physical_device_surface_capabilities_khr(physical_device, surface)
+    let capabilities = ctx.ip
+        .get_physical_device_surface_capabilities_khr(ctx.physical_device, ctx.surface)
         .map_err(to_vulkan)?;
     let extent = choose_swap_extent(&capabilities, window);
 
     let image_count = (capabilities.minImageCount + 1).min(capabilities.maxImageCount);
     let (image_sharing_mode, queue_families) =
-        if queue_family_indices.graphics != queue_family_indices.present {
+        if ctx.queue_family_indices.graphics != ctx.queue_family_indices.present {
             (
                 vk::SHARING_MODE_CONCURRENT,
-                vec![queue_family_indices.graphics, queue_family_indices.present],
+                vec![ctx.queue_family_indices.graphics, ctx.queue_family_indices.present],
             )
         } else {
             (vk::SHARING_MODE_EXCLUSIVE, vec![])
@@ -61,7 +54,7 @@ pub fn create_swapchain(
         sType: vk::STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         pNext: std::ptr::null(),
         flags: 0,
-        surface,
+        surface: ctx.surface,
         minImageCount: image_count,
         imageFormat: good_format.format,
         imageColorSpace: good_format.colorSpace,
@@ -78,7 +71,7 @@ pub fn create_swapchain(
         oldSwapchain: vk::NULL_HANDLE,
     };
 
-    let swapchain = unsafe { dp.create_swapchain_khr(device, &info) }.map_err(to_vulkan)?;
+    let swapchain = unsafe { ctx.dp.create_swapchain_khr(ctx.device, &info) }.map_err(to_vulkan)?;
     let good_format: vk::SurfaceFormatKHR = copy_surface_format_khr(good_format);
 
     Ok((swapchain, good_format, *good_mode, extent))

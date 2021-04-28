@@ -1,10 +1,8 @@
-use super::error::{to_vulkan, Result};
+use super::{Context, error::{to_vulkan, Result}};
 use vk_sys as vk;
-use vulkanic::DevicePointers;
 
-pub fn create_render_pass(
-    dp: &DevicePointers,
-    device: vk::Device,
+pub(super) fn create_render_pass(
+    ctx: &Context,
     format: &vk::SurfaceFormatKHR,
 ) -> Result<vk::RenderPass> {
     let color_attachment_desc = vk::AttachmentDescription {
@@ -59,5 +57,5 @@ pub fn create_render_pass(
         pDependencies: &subpass_dep,
     };
 
-    unsafe { dp.create_render_pass(device, &render_pass_info) }.map_err(to_vulkan)
+    unsafe { ctx.dp.create_render_pass(ctx.device, &render_pass_info) }.map_err(to_vulkan)
 }

@@ -5,10 +5,10 @@ use inline_spirv::include_spirv;
 use std::{ffi::CString, mem::size_of};
 use vk_sys as vk;
 use vulkanic::DevicePointers;
+use super::Context;
 
-pub fn create_graphics_pipeline(
-    dp: &DevicePointers,
-    device: vk::Device,
+pub(super) fn create_graphics_pipeline(
+    ctx: &Context,
     extent: &vk::Extent2D,
     render_pass: vk::RenderPass,
 ) -> Result<(
@@ -20,8 +20,8 @@ pub fn create_graphics_pipeline(
     let vert_shader = include_spirv!("shader/vert.glsl", glsl, vert);
     let frag_shader = include_spirv!("shader/frag.glsl", glsl, frag);
 
-    let vertex_shader_module = create_shader_module(dp, device, vert_shader)?;
-    let fragment_shader_module = create_shader_module(dp, device, frag_shader)?;
+    let vertex_shader_module = create_shader_module(&ctx.dp, ctx.device, vert_shader)?;
+    let fragment_shader_module = create_shader_module(&ctx.dp, ctx.device, frag_shader)?;
 
     let name = CString::new("main").map_err(to_other)?;
 
@@ -166,7 +166,7 @@ pub fn create_graphics_pipeline(
     };
 
     let pipeline_layout =
-        unsafe { dp.create_pipeline_layout(device, &pipeline_layout_info) }.map_err(to_vulkan)?;
+        unsafe { ctx.dp.create_pipeline_layout(ctx.device, &pipeline_layout_info) }.map_err(to_vulkan)?;
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo {
         sType: vk::STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -191,7 +191,7 @@ pub fn create_graphics_pipeline(
     };
 
     let pipelines =
-        unsafe { dp.create_graphics_pipelines(device, vk::NULL_HANDLE, &[pipeline_info]) }
+        unsafe { ctx.dp.create_graphics_pipelines(ctx.device, vk::NULL_HANDLE, &[pipeline_info]) }
             .map_err(to_vulkan)?;
     let pipeline: vk::Pipeline = *pipelines.iter().next().unwrap();
 

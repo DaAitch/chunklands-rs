@@ -35,15 +35,7 @@ use self::{error::to_vulkan, vk_vertex_buffer::create_vertex_buffer};
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-pub struct VulkanInit<'a> {
-    pub debug: bool,
-    pub window: &'a mut glfw::Window,
-    pub req_ext: &'a Vec<String>,
-    pub req_layers: &'a Vec<String>,
-}
-
-pub struct Vulkan {
-    ep: EntryPoints,
+struct Context {
     ip: InstancePointers,
     dp: DevicePointers,
     instance: vk::Instance,
@@ -53,8 +45,19 @@ pub struct Vulkan {
     queue_family_indices: QueueFamilyIndices,
     queue_families: QueueFamilies,
     surface: vk::SurfaceKHR,
-    swapchain: Option<Swapchain>,
     command_pool: vk::CommandPool,
+}
+
+pub struct VulkanInit<'a> {
+    pub debug: bool,
+    pub window: &'a mut glfw::Window,
+    pub req_ext: &'a Vec<String>,
+    pub req_layers: &'a Vec<String>,
+}
+
+pub struct Vulkan {
+    ctx: Context,
+    swapchain: Option<Swapchain>,
     inflight_frames: Vec<InFlightFrame>,
     current_frame: usize,
 }
@@ -97,24 +100,25 @@ impl Vulkan {
 
         let command_pool = create_command_pool(&dp, device, &queue_family_indices)?;
 
-        let mut inflight_frames = Vec::<InFlightFrame>::new();
+        let mut inflight_frames = Vec::<InFlightFrame>::with_capacity(MAX_FRAMES_IN_FLIGHT);
         for _ in 0..MAX_FRAMES_IN_FLIGHT {
             let frame = InFlightFrame::new(&dp, device)?;
             inflight_frames.push(frame);
         }
 
         Ok(Vulkan {
-            ep,
-            instance,
-            ip,
-            debugger,
-            dp,
-            physical_device,
-            device,
-            queue_family_indices,
-            queue_families: queues,
-            surface,
-            command_pool,
+            ctx: Context {
+                instance,
+                ip,
+                debugger,
+                dp,
+                physical_device,
+                device,
+                queue_family_indices,
+                queue_families: queues,
+                surface,
+                command_pool,
+            },
             inflight_frames,
             current_frame: 0,
             swapchain: None,
@@ -132,23 +136,14 @@ impl Vulkan {
     fn create_swapchain(&mut self, window: &glfw::Window) -> Result<()> {
         assert!(self.swapchain.is_none());
 
-        self.swapchain = Some(Swapchain::new(&SwapchainInit {
-            ip: &self.ip,
-            dp: &self.dp,
-            physical_device: self.physical_device,
-            device: self.device,
-            queue_family_indices: &self.queue_family_indices,
-            command_pool: self.command_pool,
-            surface: self.surface,
-            window,
-        })?);
+        self.swapchain = Some(Swapchain::new(&self.ctx, window)?);
 
         Ok(())
     }
 
     fn destroy_swapchain(&mut self) -> Result<()> {
         let swapchain = self.swapchain.take().unwrap();
-        swapchain.destroy(&self.dp, self.device, self.command_pool)
+        swapchain.destroy(&self.ctx)
     }
 
     pub fn draw_frame(&mut self, window: &glfw::Window) -> Result<()> {
@@ -164,17 +159,17 @@ impl Vulkan {
                 .get(self.current_frame)
                 .ok_or_else(|| to_other("invalid current frame"))?;
 
-            self.dp
+            self.ctx.dp
                 .wait_for_fences(
-                    self.device,
+                    self.ctx.device,
                     &[current_inflight_frame.in_flight_fence],
                     true,
                     u64::MAX,
                 )
                 .map_err(to_vulkan)?;
-            self.dp
+            self.ctx.dp
                 .acquire_next_image_khr(
-                    self.device,
+                    self.ctx.device,
                     swapchain.swapchain,
                     u64::MAX,
                     current_inflight_frame.available_semaphore,
@@ -205,9 +200,9 @@ impl Vulkan {
             })?;
 
         if swapchain_image.in_flight_fence != vk::NULL_HANDLE {
-            self.dp
+            self.ctx.dp
                 .wait_for_fences(
-                    self.device,
+                    self.ctx.device,
                     &[swapchain_image.in_flight_fence],
                     true,
                     u64::MAX,
@@ -236,13 +231,13 @@ impl Vulkan {
             pSignalSemaphores: signal_semaphores.as_ptr(),
         };
 
-        self.dp
-            .reset_fences(self.device, &[current_inflight_frame.in_flight_fence])
+        self.ctx.dp
+            .reset_fences(self.ctx.device, &[current_inflight_frame.in_flight_fence])
             .map_err(to_vulkan)?;
 
         unsafe {
-            self.dp.queue_submit(
-                self.queue_families.graphics_queue,
+            self.ctx.dp.queue_submit(
+                self.ctx.queue_families.graphics_queue,
                 &[submit_info],
                 current_inflight_frame.in_flight_fence,
             )
@@ -263,8 +258,8 @@ impl Vulkan {
         };
 
         let present_result = unsafe {
-            self.dp
-                .queue_present_khr(self.queue_families.present_queue, &present_info)
+            self.ctx.dp
+                .queue_present_khr(self.ctx.queue_families.present_queue, &present_info)
                 .map_err(to_vulkan)
         };
         match present_result {
@@ -286,54 +281,41 @@ impl Vulkan {
     }
 
     pub fn wait_idle(&mut self) -> Result<()> {
-        self.dp
-            .queue_wait_idle(self.queue_families.present_queue)
+        self.ctx.dp
+            .queue_wait_idle(self.ctx.queue_families.present_queue)
             .map_err(to_vulkan)
     }
 
     pub fn destroy(mut self) -> Result<()> {
         for inflight_frame in self.inflight_frames.drain(..) {
-            inflight_frame.destroy(&self.dp, self.device);
+            inflight_frame.destroy(&self.ctx.dp, self.ctx.device);
         }
 
         self.swapchain
             .take()
-            .map(|sc| sc.destroy(&self.dp, self.device, self.command_pool));
+            .map(|sc| sc.destroy(&self.ctx));
 
-        self.dp.destroy_command_pool(self.device, self.command_pool);
-        self.command_pool = vk::NULL_HANDLE;
+        self.ctx.dp.destroy_command_pool(self.ctx.device, self.ctx.command_pool);
+        self.ctx.command_pool = vk::NULL_HANDLE;
 
-        self.dp.destroy_device(self.device);
-        self.device = 0;
+        self.ctx.dp.destroy_device(self.ctx.device);
+        self.ctx.device = 0;
 
-        self.ip.destroy_surface_khr(self.instance, self.surface);
-        self.surface = vk::NULL_HANDLE;
+        self.ctx.ip.destroy_surface_khr(self.ctx.instance, self.ctx.surface);
+        self.ctx.surface = vk::NULL_HANDLE;
 
-        if self.debugger != vk::NULL_HANDLE {
-            self.ip
-                .destroy_debug_utils_messenger_ext(self.instance, self.debugger)
+        if self.ctx.debugger != vk::NULL_HANDLE {
+            self.ctx.ip
+                .destroy_debug_utils_messenger_ext(self.ctx.instance, self.ctx.debugger)
                 .map_err(to_vulkan)?;
-            self.debugger = vk::NULL_HANDLE;
+            self.ctx.debugger = vk::NULL_HANDLE;
         }
 
-        self.ip.destroy_instance(self.instance);
-        self.instance = 0;
+        self.ctx.ip.destroy_instance(self.ctx.instance);
+        self.ctx.instance = 0;
 
         Ok(())
     }
-}
-
-// Sc
-
-struct SwapchainInit<'a> {
-    ip: &'a InstancePointers,
-    dp: &'a DevicePointers,
-    physical_device: vk::PhysicalDevice,
-    device: vk::Device,
-    surface: vk::SurfaceKHR,
-    window: &'a glfw::Window,
-    queue_family_indices: &'a QueueFamilyIndices,
-    command_pool: vk::CommandPool,
 }
 
 struct Swapchain {
@@ -349,44 +331,22 @@ struct Swapchain {
 }
 
 impl Swapchain {
-    fn new(init: &SwapchainInit) -> Result<Self> {
-        let (swapchain, format, _, extent) = create_swapchain(
-            init.ip,
-            init.dp,
-            init.physical_device,
-            init.device,
-            init.surface,
-            init.window,
-            init.queue_family_indices,
-        )?;
-
-        let render_pass = create_render_pass(init.dp, init.device, &format)?;
+    fn new(ctx: &Context, window: &glfw::Window) -> Result<Self> {
+        let (swapchain, format, _, extent) = create_swapchain(ctx, window)?;
+        let render_pass = create_render_pass(ctx, &format)?;
 
         let (vertex_shader_module, fragment_shader_module, pipeline_layout, pipeline) =
-            create_graphics_pipeline(init.dp, init.device, &extent, render_pass)?;
+            create_graphics_pipeline(ctx, &extent, render_pass)?;
 
-        let (vertex_buffer, vertex_buffer_memory) =
-            create_vertex_buffer(init.ip, init.dp, init.physical_device, init.device)?;
+        let (vertex_buffer, vertex_buffer_memory) = create_vertex_buffer(ctx)?;
 
-        let images = init
-            .dp
-            .get_swapchain_images_khr(init.device, swapchain)
+        let images = ctx.dp
+            .get_swapchain_images_khr(ctx.device, swapchain)
             .map_err(to_vulkan)?;
 
         let mut swapchain_images = Vec::<SwapchainImage>::with_capacity(images.len());
         for image in &images {
-            let swapchain_image = SwapchainImage::new(&ScImageInit {
-                dp: init.dp,
-                command_pool: init.command_pool,
-                device: init.device,
-                extent: &extent,
-                image: *image,
-                pipeline,
-                render_pass,
-                surface_format: &format,
-                vertex_buffer,
-            })?;
-
+            let swapchain_image = SwapchainImage::new(ctx, render_pass, *image, &extent, pipeline, &format, vertex_buffer)?;
             swapchain_images.push(swapchain_image);
         }
 
@@ -405,77 +365,61 @@ impl Swapchain {
 
     fn destroy(
         self,
-        dp: &DevicePointers,
-        device: vk::Device,
-        command_pool: vk::CommandPool,
+        ctx: &Context
     ) -> Result<()> {
-        dp.device_wait_idle(device).map_err(to_vulkan)?;
+        ctx.dp.device_wait_idle(ctx.device).map_err(to_vulkan)?;
 
-        dp.free_memory(device, self.vertex_buffer_memory);
-        dp.destroy_buffer(device, self.vertex_buffer);
+        ctx.dp.free_memory(ctx.device, self.vertex_buffer_memory);
+        ctx.dp.destroy_buffer(ctx.device, self.vertex_buffer);
 
         for image in &self.images {
-            dp.destroy_framebuffer(device, image.framebuffer);
-            dp.destroy_image_view(device, image.image_view);
-            dp.free_command_buffers(device, command_pool, &[image.command_buffer]);
+            ctx.dp.destroy_framebuffer(ctx.device, image.framebuffer);
+            ctx.dp.destroy_image_view(ctx.device, image.image_view);
+            ctx.dp.free_command_buffers(ctx.device, ctx.command_pool, &[image.command_buffer]);
         }
 
-        dp.destroy_pipeline(device, self.pipeline);
-        dp.destroy_pipeline_layout(device, self.pipeline_layout);
-        dp.destroy_render_pass(device, self.render_pass);
-        dp.destroy_shader_module(device, self.vertex_shader_module);
-        dp.destroy_shader_module(device, self.fragment_shader_module);
-        dp.destroy_swapchain_khr(device, self.swapchain);
+        ctx.dp.destroy_pipeline(ctx.device, self.pipeline);
+        ctx.dp.destroy_pipeline_layout(ctx.device, self.pipeline_layout);
+        ctx.dp.destroy_render_pass(ctx.device, self.render_pass);
+        ctx.dp.destroy_shader_module(ctx.device, self.vertex_shader_module);
+        ctx.dp.destroy_shader_module(ctx.device, self.fragment_shader_module);
+        ctx.dp.destroy_swapchain_khr(ctx.device, self.swapchain);
 
         Ok(())
     }
 }
 
 struct SwapchainImage {
-    image: vk::Image,
     image_view: vk::ImageView,
     framebuffer: vk::Framebuffer,
     command_buffer: vk::CommandBuffer,
     in_flight_fence: vk::Fence,
 }
 
-struct ScImageInit<'a> {
-    dp: &'a DevicePointers,
-    device: vk::Device,
-    render_pass: vk::RenderPass,
-    image: vk::Image,
-    extent: &'a vk::Extent2D,
-    command_pool: vk::CommandPool,
-    pipeline: vk::Pipeline,
-    surface_format: &'a vk::SurfaceFormatKHR,
-    vertex_buffer: vk::Buffer,
-}
-
 impl SwapchainImage {
-    fn new(init: &ScImageInit) -> Result<Self> {
+    fn new(ctx: &Context, render_pass: vk::RenderPass, image: vk::Image, extent: &vk::Extent2D, pipeline: vk::Pipeline, surface_format: &vk::SurfaceFormatKHR, vertex_buffer: vk::Buffer) -> Result<Self> {
         let image_view =
-            create_image_view(init.dp, init.device, init.image, init.surface_format.format)?;
+            create_image_view(&ctx.dp, ctx.device, image, surface_format.format)?;
         let framebuffer = create_framebuffer(
-            init.dp,
-            init.device,
-            init.render_pass,
+            &ctx.dp,
+            ctx.device,
+            render_pass,
             image_view,
-            init.extent,
+            extent,
         )?;
         let command_buffer = create_command_buffer(
-            init.dp,
-            init.device,
-            init.pipeline,
-            init.render_pass,
-            init.command_pool,
+            &ctx.dp,
+            ctx.device,
+            pipeline,
+            render_pass,
+            ctx.command_pool,
             framebuffer,
-            init.extent,
-            init.vertex_buffer,
+            extent,
+            vertex_buffer,
         )?;
 
         Ok(Self {
             framebuffer,
-            image: init.image,
             image_view,
             command_buffer,
             in_flight_fence: vk::NULL_HANDLE,

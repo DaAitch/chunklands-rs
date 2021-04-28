@@ -1,17 +1,11 @@
-use super::{
-    error::{to_other, to_vulkan, Result},
-    vertex::Vertex,
-};
+use super::{Context, error::{to_other, to_vulkan, Result}, vertex::Vertex};
 use glm::{Vec2, Vec3};
 use std::{mem::size_of, ptr};
 use vk_sys as vk;
-use vulkanic::{DevicePointers, InstancePointers};
+use vulkanic::{InstancePointers};
 
-pub fn create_vertex_buffer(
-    ip: &InstancePointers,
-    dp: &DevicePointers,
-    physical_device: vk::PhysicalDevice,
-    device: vk::Device,
+pub(super) fn create_vertex_buffer(
+    ctx: &Context
 ) -> Result<(vk::Buffer, vk::DeviceMemory)> {
     let vertices = [
         Vertex {
@@ -39,29 +33,29 @@ pub fn create_vertex_buffer(
         pQueueFamilyIndices: ptr::null(),
     };
 
-    let buffer = unsafe { dp.create_buffer(device, &buffer_info) }.map_err(to_vulkan)?;
+    let buffer = unsafe { ctx.dp.create_buffer(ctx.device, &buffer_info) }.map_err(to_vulkan)?;
 
-    let memory_requirements = dp.get_buffer_memory_requirements(device, buffer);
+    let memory_requirements = ctx.dp.get_buffer_memory_requirements(ctx.device, buffer);
 
     let allocate_info = vk::MemoryAllocateInfo {
         sType: vk::STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         pNext: ptr::null(),
         allocationSize: memory_requirements.size,
         memoryTypeIndex: find_memory_type(
-            ip,
-            physical_device,
+            &ctx.ip,
+            ctx.physical_device,
             memory_requirements.memoryTypeBits,
             vk::MEMORY_PROPERTY_HOST_VISIBLE_BIT | vk::MEMORY_PROPERTY_HOST_COHERENT_BIT,
         )?,
     };
 
-    let device_memory = unsafe { dp.allocate_memory(device, &allocate_info) }.map_err(to_vulkan)?;
+    let device_memory = unsafe { ctx.dp.allocate_memory(ctx.device, &allocate_info) }.map_err(to_vulkan)?;
 
-    dp.bind_buffer_memory(device, buffer, device_memory, 0)
+    ctx.dp.bind_buffer_memory(ctx.device, buffer, device_memory, 0)
         .map_err(to_vulkan)?;
 
-    let data = dp
-        .map_memory(device, device_memory, 0, buffer_info.size, 0)
+    let data = ctx.dp
+        .map_memory(ctx.device, device_memory, 0, buffer_info.size, 0)
         .map_err(to_vulkan)?;
     unsafe {
         std::ptr::copy_nonoverlapping(
@@ -70,7 +64,7 @@ pub fn create_vertex_buffer(
             buffer_info.size as usize,
         )
     };
-    dp.unmap_memory(device, device_memory);
+    ctx.dp.unmap_memory(ctx.device, device_memory);
 
     Ok((buffer, device_memory))
 }
