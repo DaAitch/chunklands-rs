@@ -1,12 +1,13 @@
-use super::{Context, error::{to_other, to_vulkan, Result}, vertex::Vertex};
+use super::{
+    error::{to_other, to_vulkan, Result},
+    vertex::Vertex,
+    Context,
+};
 use glm::{Vec2, Vec3};
 use std::{mem::size_of, ptr};
 use vk_sys as vk;
-use vulkanic::{InstancePointers};
 
-pub(super) fn create_vertex_buffer(
-    ctx: &Context
-) -> Result<(vk::Buffer, vk::DeviceMemory)> {
+pub(super) fn create_vertex_buffer(ctx: &Context) -> Result<(vk::Buffer, vk::DeviceMemory)> {
     let vertices = [
         Vertex {
             pos: Vec2::new(0.0, -0.5),
@@ -42,19 +43,21 @@ pub(super) fn create_vertex_buffer(
         pNext: ptr::null(),
         allocationSize: memory_requirements.size,
         memoryTypeIndex: find_memory_type(
-            &ctx.ip,
-            ctx.physical_device,
+            ctx,
             memory_requirements.memoryTypeBits,
             vk::MEMORY_PROPERTY_HOST_VISIBLE_BIT | vk::MEMORY_PROPERTY_HOST_COHERENT_BIT,
         )?,
     };
 
-    let device_memory = unsafe { ctx.dp.allocate_memory(ctx.device, &allocate_info) }.map_err(to_vulkan)?;
+    let device_memory =
+        unsafe { ctx.dp.allocate_memory(ctx.device, &allocate_info) }.map_err(to_vulkan)?;
 
-    ctx.dp.bind_buffer_memory(ctx.device, buffer, device_memory, 0)
+    ctx.dp
+        .bind_buffer_memory(ctx.device, buffer, device_memory, 0)
         .map_err(to_vulkan)?;
 
-    let data = ctx.dp
+    let data = ctx
+        .dp
         .map_memory(ctx.device, device_memory, 0, buffer_info.size, 0)
         .map_err(to_vulkan)?;
     unsafe {
@@ -70,15 +73,13 @@ pub(super) fn create_vertex_buffer(
 }
 
 fn find_memory_type(
-    ip: &InstancePointers,
-    physical_device: vk::PhysicalDevice,
+    ctx: &Context,
     type_filter: u32,
     flags: vk::MemoryPropertyFlags,
 ) -> Result<u32> {
-    let properties = ip.get_physical_device_memory_properties(physical_device);
-    for i in 0..properties.memoryTypeCount {
+    for i in 0..ctx.memory_properties.memoryTypeCount {
         if (type_filter & (1 << i)) != 0
-            && (properties.memoryTypes[i as usize].propertyFlags & flags) != 0
+            && (ctx.memory_properties.memoryTypes[i as usize].propertyFlags & flags) != 0
         {
             return Ok(i);
         }

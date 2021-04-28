@@ -1,11 +1,11 @@
 use super::error::{to_other, to_vulkan, Result};
 use super::util::copy_extent_2d;
 use super::vertex::Vertex;
+use super::Context;
 use inline_spirv::include_spirv;
 use std::{ffi::CString, mem::size_of};
 use vk_sys as vk;
 use vulkanic::DevicePointers;
-use super::Context;
 
 pub(super) fn create_graphics_pipeline(
     ctx: &Context,
@@ -165,8 +165,11 @@ pub(super) fn create_graphics_pipeline(
         pPushConstantRanges: std::ptr::null(),
     };
 
-    let pipeline_layout =
-        unsafe { ctx.dp.create_pipeline_layout(ctx.device, &pipeline_layout_info) }.map_err(to_vulkan)?;
+    let pipeline_layout = unsafe {
+        ctx.dp
+            .create_pipeline_layout(ctx.device, &pipeline_layout_info)
+    }
+    .map_err(to_vulkan)?;
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo {
         sType: vk::STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -190,9 +193,11 @@ pub(super) fn create_graphics_pipeline(
         basePipelineIndex: -1,
     };
 
-    let pipelines =
-        unsafe { ctx.dp.create_graphics_pipelines(ctx.device, vk::NULL_HANDLE, &[pipeline_info]) }
-            .map_err(to_vulkan)?;
+    let pipelines = unsafe {
+        ctx.dp
+            .create_graphics_pipelines(ctx.device, vk::NULL_HANDLE, &[pipeline_info])
+    }
+    .map_err(to_vulkan)?;
     let pipeline: vk::Pipeline = *pipelines.iter().next().unwrap();
 
     Ok((

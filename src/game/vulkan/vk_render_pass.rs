@@ -1,4 +1,7 @@
-use super::{Context, error::{to_vulkan, Result}};
+use super::{
+    error::{to_vulkan, Result},
+    Context,
+};
 use vk_sys as vk;
 
 pub(super) fn create_render_pass(

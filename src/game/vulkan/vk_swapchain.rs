@@ -1,6 +1,7 @@
-use super::{Context, util::{copy_extent_2d, copy_surface_format_khr}};
+use super::error::{to_other, to_vulkan, Error, Result};
 use super::{
-    error::{to_other, to_vulkan, Error, Result}
+    util::{copy_extent_2d, copy_surface_format_khr},
+    Context,
 };
 use glfw::Window;
 use vk_sys as vk;
@@ -14,10 +15,12 @@ pub(super) fn create_swapchain(
     vk::PresentModeKHR,
     vk::Extent2D,
 )> {
-    let formats = ctx.ip
+    let formats = ctx
+        .ip
         .get_physical_device_surface_formats_khr(ctx.physical_device, ctx.surface)
         .map_err(to_vulkan)?;
-    let modes = ctx.ip
+    let modes = ctx
+        .ip
         .get_physical_device_surface_present_modes_khr(ctx.physical_device, ctx.surface)
         .map_err(to_vulkan)?;
 
@@ -34,7 +37,8 @@ pub(super) fn create_swapchain(
         .find(|mode| **mode == vk::PRESENT_MODE_MAILBOX_KHR)
         .unwrap_or(&vk::PRESENT_MODE_FIFO_KHR);
 
-    let capabilities = ctx.ip
+    let capabilities = ctx
+        .ip
         .get_physical_device_surface_capabilities_khr(ctx.physical_device, ctx.surface)
         .map_err(to_vulkan)?;
     let extent = choose_swap_extent(&capabilities, window);
@@ -44,7 +48,10 @@ pub(super) fn create_swapchain(
         if ctx.queue_family_indices.graphics != ctx.queue_family_indices.present {
             (
                 vk::SHARING_MODE_CONCURRENT,
-                vec![ctx.queue_family_indices.graphics, ctx.queue_family_indices.present],
+                vec![
+                    ctx.queue_family_indices.graphics,
+                    ctx.queue_family_indices.present,
+                ],
             )
         } else {
             (vk::SHARING_MODE_EXCLUSIVE, vec![])
