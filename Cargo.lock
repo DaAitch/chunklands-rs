@@ -548,7 +548,7 @@ checksum = "712e7b00b858d5a65e4272e3dfd83f795a31467ba67425d853f32b966a09c907"
 
 [[package]]
 name = "vulkanic"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "vk-sys 0.5.3",
 ]

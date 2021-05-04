@@ -59,14 +59,17 @@ impl Game {
 
         while !self.window.should_close() {
             self.glfw.poll_events();
+
             for (_, event) in glfw::flush_messages(&self.window_events) {
                 match event {
                     glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) => {
                         self.window.set_should_close(true);
                     }
+
                     glfw::WindowEvent::FramebufferSize(_, _) => {
-                        vulkan.change_framebuffer().unwrap();
+                        vulkan.on_framebuffer_changed().unwrap();
                     }
+
                     _ => {}
                 }
             }
